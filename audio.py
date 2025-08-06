@@ -67,23 +67,46 @@ def play_sound(path: str) -> None:
     """
     Attempt to play ``path`` using the ``playsound`` package.
 
-    If the ``playsound`` dependency is missing, the file does not exist,
-    or any runtime error occurs, the function logs the problem and falls
-    back to ``_fallback_print`` which writes a deterministic string to
-    ``stdout``.
+    This function is defensive: it validates the input, ensures the
+    required dependency is present, checks that the file exists, and
+    catches any runtime errors.  On failure it logs a warning and falls
+    back to a deterministic stub printed to ``stdout`` via
+    ``_fallback_print``.  The goal is to never raise an exception to
+    callers, preserving application stability in headless or minimal
+    environments.
 
     Parameters
     ----------
     path: str
         Filesystem path to the audio file (WAV, MP3, etc.).
     """
-    try:
-        # Lazy import to avoid a hard dependency at import time.
-        from playsound import playsound  # type: ignore
+    # Validate the path argument early.
+    if not isinstance(path, str) or not path:
+        logger.warning("Invalid audio path supplied to play_sound: %r", path)
+        _fallback_print(path if isinstance(path, str) else "<invalid>")
+        return
 
-        # ``playsound`` may raise a variety of exceptions (e.g.
-        # ``FileNotFoundError`` or ``PlaysoundException``).  We catch all
-        # to ensure the application never crashes because of audio.
+    # Ensure the audio file exists before attempting playback.
+    if not os.path.isfile(path):
+        logger.warning("Audio file not found: %s – falling back to stub.", path)
+        _fallback_print(path)
+        return
+
+    try:
+        # Lazy import to keep ``playsound`` optional.
+        try:
+            from playsound import playsound  # type: ignore
+        except ImportError as imp_err:
+            logger.warning(
+                "playsound package not available – falling back to stub. Error: %s",
+                imp_err,
+            )
+            _fallback_print(path)
+            return
+
+        # Attempt actual playback; ``playsound`` may raise various
+        # exceptions (e.g., ``PlaysoundException``).  We catch any
+        # exception to guarantee stability.
         playsound(path)
         logger.debug("Played sound: %s", path)
     except Exception as exc:  # noqa: BLE001
